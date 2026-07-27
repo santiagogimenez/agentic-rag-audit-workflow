@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getChats, getProjects, getToolCatalog } from "@/lib/backend";
+import { deleteChat, deleteProject, getChats, getProjects, getToolCatalog } from "@/lib/backend";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 
 // Primer corte de la Sidebar (tarea 1d/2b del plan): estructura + navegación real contra los
@@ -12,12 +12,35 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: getProjects });
   const toolsQuery = useQuery({ queryKey: ["tools"], queryFn: getToolCatalog });
   const standaloneChatsQuery = useQuery({
     queryKey: ["chats", { standalone: true }],
     queryFn: () => getChats({ standalone: true }),
+  });
+
+  const deleteProjectMutation = useMutation({
+    mutationFn: deleteProject,
+    onSuccess: (_, projectId) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["chats"] });
+      if (location.pathname.startsWith(`/projects/${projectId}`)) {
+        navigate("/");
+      }
+    },
+  });
+
+  const deleteChatMutation = useMutation({
+    mutationFn: deleteChat,
+    onSuccess: (_, chatId) => {
+      queryClient.invalidateQueries({ queryKey: ["chats"] });
+      if (location.pathname === `/chats/${chatId}`) {
+        navigate("/");
+      }
+    },
   });
 
   return (
@@ -77,19 +100,36 @@ export function Sidebar() {
             projectsQuery.data?.map((project) => {
               const active = location.pathname.startsWith(`/projects/${project.id}`);
               return (
-                <Link
+                <div
                   key={project.id}
-                  to={`/projects/${project.id}`}
-                  className={`flex items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
+                  className={`group flex items-center gap-1 rounded-sm border-l-2 pr-1 ${
                     active
                       ? "border-accent bg-accent-tint text-text"
                       : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
                   }`}
-                  title={project.name}
                 >
-                  <FolderIcon className={active ? "text-accent" : "text-text-faint"} />
-                  <span className="truncate">{project.name}</span>
-                </Link>
+                  <Link
+                    to={`/projects/${project.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-2 truncate px-2 py-1.5 text-[13px]"
+                    title={project.name}
+                  >
+                    <FolderIcon className={active ? "text-accent" : "text-text-faint"} />
+                    <span className="truncate">{project.name}</span>
+                  </Link>
+                  <button
+                    className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-faint hover:bg-bg-sunken hover:text-danger group-hover:flex"
+                    title="Eliminar proyecto"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (confirm(`Eliminar proyecto \"${project.name}\" y sus chats/reportes/hallazgos?`)) {
+                        deleteProjectMutation.mutate(project.id);
+                      }
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               );
             })}
         </div>
@@ -122,18 +162,35 @@ export function Sidebar() {
               Recientes
             </div>
             {standaloneChatsQuery.data.map((chat) => (
-              <Link
+              <div
                 key={chat.id}
-                to={`/chats/${chat.id}`}
-                className={`flex items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
+                className={`group flex items-center gap-1 rounded-sm border-l-2 pr-1 ${
                   location.pathname === `/chats/${chat.id}`
                     ? "border-accent bg-accent-tint text-text"
                     : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
                 }`}
               >
-                <ChatIcon className="text-text-faint" />
-                <span className="truncate">{chat.title ?? "Nuevo chat"}</span>
-              </Link>
+                <Link
+                  to={`/chats/${chat.id}`}
+                  className="flex min-w-0 flex-1 items-center gap-2 truncate px-2 py-1.5 text-[13px]"
+                >
+                  <ChatIcon className="text-text-faint" />
+                  <span className="truncate">{chat.title ?? "Nuevo chat"}</span>
+                </Link>
+                <button
+                  className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-faint hover:bg-bg-sunken hover:text-danger group-hover:flex"
+                  title="Eliminar chat"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (confirm("Eliminar este chat?")) {
+                      deleteChatMutation.mutate(chat.id);
+                    }
+                  }}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -199,6 +256,17 @@ function ChatIcon({ className = "" }: { className?: string }) {
   return (
     <svg className={`h-[17px] w-[17px] flex-shrink-0 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 11.5a8.5 8.5 0 1 1-3.8-7.1L21 3l-1 4.3a8.4 8.4 0 0 1 1 4.2Z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   );
 }

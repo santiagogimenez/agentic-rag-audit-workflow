@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from openai import BadRequestError
 from sqlalchemy.orm import Session
 
 from app.agentic_core.client import MODEL_NAME, get_client
@@ -294,11 +295,40 @@ async def run_agent_turn(
     for _iteration in range(MAX_TOOL_ITERATIONS):
         api_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history_messages]
 
-        response = await client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=api_messages,
-            tools=AGENT_TOOL_SPECS,
-        )
+        try:
+            response = await client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=api_messages,
+                tools=AGENT_TOOL_SPECS,
+            )
+        except BadRequestError as exc:
+            # Groq a veces responde `tool_use_failed` cuando el modelo emite una llamada
+            # de función en formato inválido. En vez de romper el endpoint con 500,
+            # degradamos a respuesta textual en el mismo turno.
+            if "tool_use_failed" not in str(exc):
+                raise
+            fallback_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        SYSTEM_PROMPT
+                        + "\nSi no podés invocar herramientas, respondé en texto claro "
+                        "explicando el siguiente paso para el auditor sin usar tool-calls."
+                    ),
+                },
+                *history_messages,
+            ]
+            fallback_response = await client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=fallback_messages,
+            )
+            assistant_message = fallback_response.choices[0].message
+            history_messages.append(_assistant_message_to_dict(assistant_message))
+            final_text = assistant_message.content or (
+                "No pude completar la invocación automática de herramientas en este turno. "
+                "Reintentá el pedido con una consulta más específica."
+            )
+            break
         assistant_message = response.choices[0].message
         history_messages.append(_assistant_message_to_dict(assistant_message))
 

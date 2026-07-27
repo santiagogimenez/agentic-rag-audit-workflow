@@ -30,7 +30,7 @@ export function ToolModal({ existing, onClose }: ToolModalProps) {
   const mutation = useMutation({
     mutationFn: async () => {
       const clean = actions.filter((a) => a.label.trim() && a.command.trim());
-      if (existing) return updateTool(existing.key, { label: label.trim(), key, description: description.trim(), kind, actions: clean });
+      if (existing) return updateTool(existing.key, { label: label.trim(), description: description.trim(), kind, actions: clean });
       return createTool({ label: label.trim(), key, description: description.trim(), kind, actions: clean });
     },
     onSuccess: () => {

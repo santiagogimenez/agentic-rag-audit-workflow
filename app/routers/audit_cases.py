@@ -11,6 +11,12 @@ from app.db import get_db
 from app.deps import CurrentUser, get_current_user
 from app.errors import api_error_detail
 from app.models.audit_case import AuditCase
+from app.models.case_file import CaseFile
+from app.models.chat import Chat
+from app.models.finding import Finding
+from app.models.message import Message
+from app.models.project_tool import ProjectTool
+from app.models.report import Report
 from app.schemas.audit_case import AuditCaseCreate, AuditCaseOut, AuditCasePatch
 
 router = APIRouter(prefix="/api/audit-cases", tags=["audit-cases"])
@@ -85,3 +91,28 @@ def patch_audit_case(
     db.commit()
     db.refresh(case)
     return case
+
+
+@router.delete("/{case_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_audit_case(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Elimina un proyecto y todos sus datos asociados.
+
+    Endpoint de limpieza manual para reiniciar trabajo en desarrollo.
+    """
+    case = _get_case_or_404(db, case_id)
+
+    chat_ids = [row[0] for row in db.query(Chat.id).filter(Chat.case_id == case_id).all()]
+    if chat_ids:
+        db.query(Message).filter(Message.chat_id.in_(chat_ids)).delete(synchronize_session=False)
+        db.query(Chat).filter(Chat.id.in_(chat_ids)).delete(synchronize_session=False)
+
+    db.query(CaseFile).filter(CaseFile.case_id == case_id).delete(synchronize_session=False)
+    db.query(ProjectTool).filter(ProjectTool.case_id == case_id).delete(synchronize_session=False)
+    db.query(Report).filter(Report.case_id == case_id).delete(synchronize_session=False)
+    db.query(Finding).filter(Finding.case_id == case_id).delete(synchronize_session=False)
+    db.delete(case)
+    db.commit()

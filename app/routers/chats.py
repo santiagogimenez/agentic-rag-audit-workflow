@@ -140,6 +140,22 @@ def patch_chat(
     return chat
 
 
+@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat(
+    chat_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Elimina un chat y su transcript completo.
+
+    Se usa para limpieza manual desde la UI (arranque de cero en desarrollo).
+    """
+    chat = _get_chat_or_404(db, chat_id)
+    db.query(Message).filter(Message.chat_id == chat.id).delete(synchronize_session=False)
+    db.delete(chat)
+    db.commit()
+
+
 @router.get("/{chat_id}/messages", response_model=list[MessageOut])
 def list_messages(
     chat_id: str,

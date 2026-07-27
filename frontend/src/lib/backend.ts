@@ -52,6 +52,10 @@ export async function createProject(name: string, context: string | null = null)
   return toProject(created);
 }
 
+export async function deleteProject(id: string): Promise<void> {
+  await apiFetch(`/audit-cases/${id}`, { method: "DELETE" });
+}
+
 // ---------------------------------------------------------------------------
 // Chats y mensajes
 // ---------------------------------------------------------------------------
@@ -115,6 +119,10 @@ export async function createChat(caseId: string | null): Promise<ChatSummary> {
     body: JSON.stringify({ case_id: caseId }),
   });
   return toChatSummary(created);
+}
+
+export async function deleteChat(id: string): Promise<void> {
+  await apiFetch(`/chats/${id}`, { method: "DELETE" });
 }
 
 export async function getMessages(chatId: string): Promise<ChatMessage[]> {
