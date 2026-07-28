@@ -1,16 +1,16 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addProjectSources, getProjectSources } from "@/lib/backend";
+import { addProjectSources, getProjectSources, removeProjectSource } from "@/lib/backend";
 
 // Fuentes adjuntas a un proyecto: dropzone con drag&drop + selector nativo, lista con tamaño.
-// Real contra `POST/GET /api/audit-cases/{id}/files`: cada archivo se ingesta en Chroma
+// Real contra `POST/GET/DELETE /api/audit-cases/{id}/files`: cada archivo se ingesta en Chroma
 // taggeado con el `case_id` real -- buscable junto con la normativa general desde
-// `search_evidence`, sin tool nueva. Sin botón de "quitar" a propósito: `CaseFile` es
-// append-only en el backend real (mismo criterio que Finding/Report), no hay DELETE.
+// `search_evidence`, sin tool nueva.
 export function SourcesPanel({ caseId }: { caseId: string }) {
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sourcesQuery = useQuery({
@@ -22,18 +22,59 @@ export function SourcesPanel({ caseId }: { caseId: string }) {
 
   const addMutation = useMutation({
     mutationFn: (files: File[]) => addProjectSources(caseId, files),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setFeedback({ type: "success", text: "Fuentes cargadas correctamente." });
+      invalidate();
+    },
+    onError: (error: unknown) => {
+      const text = error instanceof Error ? error.message : "No se pudieron cargar las fuentes.";
+      setFeedback({ type: "error", text });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (fileId: string) => removeProjectSource(caseId, fileId),
+    onSuccess: () => {
+      setFeedback({ type: "success", text: "Fuente eliminada correctamente." });
+      invalidate();
+    },
+    onError: (error: unknown) => {
+      const text = error instanceof Error ? error.message : "No se pudo eliminar la fuente.";
+      setFeedback({ type: "error", text });
+    },
   });
 
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    setFeedback(null);
     addMutation.mutate(Array.from(fileList));
+  };
+
+  const handleDelete = (fileId: string, fileName: string) => {
+    const accepted = window.confirm(`Eliminar la fuente \"${fileName}\"? Esta accion no se puede deshacer.`);
+    if (!accepted) {
+      setFeedback({ type: "success", text: "Eliminacion cancelada." });
+      return;
+    }
+    setFeedback(null);
+    removeMutation.mutate(fileId);
   };
 
   const sources = sourcesQuery.data ?? [];
 
   return (
     <div>
+      {feedback && (
+        <div
+          className={`mb-3 rounded border px-3 py-2 text-xs ${
+            feedback.type === "success"
+              ? "border-verdigris/40 bg-verdigris-tint text-verdigris"
+              : "border-flag/40 bg-flag-tint text-flag"
+          }`}
+        >
+          {feedback.text}
+        </div>
+      )}
       <div
         onClick={() => fileInputRef.current?.click()}
         onDragEnter={(e) => {
@@ -78,6 +119,14 @@ export function SourcesPanel({ caseId }: { caseId: string }) {
                 <div className="truncate text-[13.5px] font-medium">{file.name}</div>
                 <div className="text-[11.5px] text-text-faint">{file.sizeLabel}</div>
               </div>
+              <button
+                className="rounded border border-border px-2 py-1 text-[11px] text-text-dim hover:border-flag hover:text-flag"
+                onClick={() => handleDelete(file.id, file.name)}
+                disabled={removeMutation.isPending}
+                title="Eliminar fuente"
+              >
+                Eliminar
+              </button>
             </div>
           ))}
         </div>

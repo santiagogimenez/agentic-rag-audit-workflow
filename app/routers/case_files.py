@@ -9,6 +9,7 @@ nueva -- mismo criterio de diseño que el plan de migración ya aprobó.
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -19,7 +20,7 @@ from app.deps import CurrentUser, get_current_user
 from app.errors import api_error_detail
 from app.models.audit_case import AuditCase
 from app.models.case_file import CaseFile
-from app.rag.case_file_storage import write_case_file_blob
+from app.rag.case_file_storage import delete_case_file_blob, write_case_file_blob
 from app.rag.ingestion import UnsupportedFormatError, compute_doc_hash, ingest_document
 from app.rag.vectorstore import get_collection
 from app.schemas.case_file import CaseFileOut
@@ -39,6 +40,18 @@ def _get_case_or_404(db: Session, case_id: str) -> AuditCase:
     return case
 
 
+def _get_case_file_or_404(db: Session, case_id: str, file_id: str) -> CaseFile:
+    case_file = db.get(CaseFile, file_id)
+    if case_file is None or case_file.case_id != case_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=api_error_detail(
+                status.HTTP_404_NOT_FOUND, "Case file not found", "case_file_not_found"
+            ),
+        )
+    return case_file
+
+
 @router.post(
     "/{case_id}/files", response_model=CaseFileOut, status_code=status.HTTP_201_CREATED
 )
@@ -55,6 +68,7 @@ async def upload_case_file(
     filename = file.filename or "archivo_sin_nombre"
 
     case_file = CaseFile(
+        id=str(uuid.uuid4()),
         case_id=case_id,
         filename=filename,
         size_bytes=len(content),
@@ -108,3 +122,75 @@ def list_case_files(
         .order_by(CaseFile.created_at.desc())
         .all()
     )
+
+
+@router.delete("/{case_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_case_file(
+    case_id: str,
+    file_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Borra una fuente cargada en un proyecto y limpia sus artefactos asociados.
+
+    Flujo:
+    1. Valida que el proyecto exista y que el archivo pertenezca a ese proyecto.
+    2. Borra el archivo fisico en el blob storage local.
+    3. Borra en Chroma los chunks del archivo para ese proyecto (source+doc_hash+case_id),
+       solo si no quedan otras filas que referencien ese mismo contenido.
+    4. Borra la fila `CaseFile`.
+    """
+    _get_case_or_404(db, case_id)
+    case_file = _get_case_file_or_404(db, case_id, file_id)
+
+    try:
+        delete_case_file_blob(case_file.blob_path)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=api_error_detail(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Fallo borrando el archivo fisico: {exc}",
+                "storage_delete_failed",
+            ),
+        ) from exc
+
+    shared_rows = (
+        db.query(CaseFile)
+        .filter(
+            CaseFile.case_id == case_id,
+            CaseFile.filename == case_file.filename,
+            CaseFile.doc_hash == case_file.doc_hash,
+            CaseFile.id != case_file.id,
+        )
+        .count()
+    )
+
+    if shared_rows == 0:
+        try:
+            collection = get_collection()
+            scoped = collection.get(where={"case_id": case_id}, include=["metadatas"])
+            ids = scoped.get("ids", []) or []
+            metadatas = scoped.get("metadatas", []) or []
+
+            ids_to_delete: list[str] = []
+            for chunk_id, metadata in zip(ids, metadatas):
+                if not metadata:
+                    continue
+                if metadata.get("source") == case_file.filename and metadata.get("doc_hash") == case_file.doc_hash:
+                    ids_to_delete.append(chunk_id)
+
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=api_error_detail(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    f"Fallo limpiando el indice vectorial: {exc}",
+                    "vectorstore_delete_failed",
+                ),
+            ) from exc
+
+    db.delete(case_file)
+    db.commit()

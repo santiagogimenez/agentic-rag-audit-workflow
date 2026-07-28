@@ -254,6 +254,10 @@ export async function addProjectSources(caseId: string, files: File[]): Promise<
   return getProjectSources(caseId);
 }
 
+export async function removeProjectSource(caseId: string, fileId: string): Promise<void> {
+  await apiFetch(`/audit-cases/${caseId}/files/${fileId}`, { method: "DELETE" });
+}
+
 // ---------------------------------------------------------------------------
 // Informes
 // ---------------------------------------------------------------------------

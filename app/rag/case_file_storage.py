@@ -19,3 +19,27 @@ def write_case_file_blob(case_id: str, file_id: str, filename: str, content: byt
     relative_path = f"{case_id}/{file_id}{suffix}"
     (CASE_FILES_DIR / relative_path).write_bytes(content)
     return relative_path
+
+
+def delete_case_file_blob(blob_path: str) -> bool:
+    """Borra un blob de fuente por su ruta relativa.
+
+    Returns:
+        True si el archivo existia y se elimino.
+        False si no existia (no se considera error fatal para la limpieza logica).
+    """
+    target = CASE_FILES_DIR / blob_path
+    if not target.exists():
+        return False
+
+    target.unlink()
+
+    # Limpieza best-effort del directorio del caso cuando queda vacio.
+    parent = target.parent
+    if parent.exists() and parent != CASE_FILES_DIR:
+        try:
+            parent.rmdir()
+        except OSError:
+            pass
+
+    return True
