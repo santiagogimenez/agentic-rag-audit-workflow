@@ -122,7 +122,7 @@ export function Sidebar() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      if (confirm(`Eliminar proyecto \"${project.name}\" y sus chats/reportes/hallazgos?`)) {
+                      if (confirm(`Eliminar proyecto "${project.name}" y sus chats/reportes/hallazgos?`)) {
                         deleteProjectMutation.mutate(project.id);
                       }
                     }}

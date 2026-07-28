@@ -51,7 +51,7 @@ export function SourcesPanel({ caseId }: { caseId: string }) {
   };
 
   const handleDelete = (fileId: string, fileName: string) => {
-    const accepted = window.confirm(`Eliminar la fuente \"${fileName}\"? Esta accion no se puede deshacer.`);
+    const accepted = window.confirm(`Eliminar la fuente "${fileName}"? Esta accion no se puede deshacer.`);
     if (!accepted) {
       setFeedback({ type: "success", text: "Eliminacion cancelada." });
       return;
